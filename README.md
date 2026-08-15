@@ -24,6 +24,11 @@
 </div>
 
 ---
+# EiBrief-AI
+
+**[LIVE APPLICATION](https://eibrief-account-signal-synthesizer-5xkkswcm9xbms6hximwrpr.streamlit.app/)**
+
+**Status: LIVE**
 
 <br/>
 
