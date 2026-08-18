@@ -8,7 +8,7 @@
   ╚══════╝ ╚═════╝ ╚═════╝ ╚═╝  ╚═╝╚═╝╚═╝     ╚═╝╚══════╝
 
   EiBrief-AI Universal :: Enterprise Signal Synthesis OS
-  Version : 5.2.0 "Dynamic Graphite"
+  Version : 6.0.0 "Dynamic Graphite"
   Author  : Kaduri Ganesh
 ================================================================================
 """
@@ -37,12 +37,12 @@ except ImportError:
 # ----------------------------------------------------------------------------
 # FIXED CREDENTIALS (backend-only, never exposed to frontend)
 # ----------------------------------------------------------------------------
-_GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+_GEMINI_API_KEY =  st.secrets["GEMINI_API_KEY"]
 _GEMINI_MODEL = "gemini-1.5-pro"
 
 APP_NAME = "EiBrief-AI Universal"
 APP_TAGLINE = "Just tell me what changed."
-APP_VERSION = "5.2.0 Graphite"
+APP_VERSION = "6.0.0 Graphite"
 DB_FILE = "eibrief_archive.db"
 
 SEVERITY_WEIGHT = {
@@ -739,7 +739,7 @@ def archive_stats() -> Dict[str, int]:
     return {"total": total, "roles": roles, "projects": projects, "today": today}
 
 # ============================================================================
-# LLM SYNTHESIS ENGINE (Bulletproof JSON Mode)
+# LLM SYNTHESIS ENGINE (Bulletproof JSON Mode & Human-Friendly Tone)
 # ============================================================================
 
 def _configure_gemini() -> bool:
@@ -752,15 +752,30 @@ def _configure_gemini() -> bool:
 
 def _llm_synthesise(role: str, signals: str, top_risks: List[Risk]) -> Optional[Dict[str, Any]]:
     risks_summary = "\n".join(f"- {r.category} ({r.severity}, score {r.score}): {r.why}" for r in top_risks[:3])
-    prompt = f"""You are Ei, a senior analyst writing for a {role}. Read the raw signals below and the pre-scored top risks. Return a JSON object with exactly these keys: "changes" (list of 3 to 5 short bullet points), "matters" (1 to 2 sentences connecting the dots), "action" (one single sentence next step). No emoji. Plain language. Ground every sentence in the signals. RAW SIGNALS:\n{signals}\nTOP RISKS:\n{risks_summary}"""
+    prompt = f"""You are Ei, a highly empathetic and sharp senior analyst. Your job is to read messy, lengthy raw operational signals for a {role} and distill them into a clear, human-friendly executive brief. 
+
+Write in plain, accessible English. Avoid technical jargon where possible. Explain *why* it matters in a way a non-technical executive could understand instantly without feeling overwhelmed.
+
+Return a JSON object with exactly these keys:
+1. "changes": A list of 3 to 5 concise bullet points summarizing what materially changed in the last 24 hours. Strip out the noise.
+2. "matters": 1 to 2 sentences connecting the dots. Explain the real-world impact of these changes in a calm, professional tone.
+3. "action": One single, clear sentence stating the most useful next step.
+
+Do not use emojis. Ground every sentence strictly in the provided signals.
+
+RAW SIGNALS:
+{signals}
+
+PRE-SCORED TOP RISKS:
+{risks_summary}"""
     
     try:
         model = genai.GenerativeModel(_GEMINI_MODEL)
         resp = model.generate_content(
             prompt,
             generation_config=genai.types.GenerationConfig(
-                temperature=0.3,
-                max_output_tokens=800,
+                temperature=0.4,
+                max_output_tokens=1500,
                 response_mime_type="application/json"
             )
         )
@@ -841,9 +856,23 @@ _CSS = """
     .stTabs [data-baseweb="tab"] { font-family: 'Sora', sans-serif !important; font-weight: 500; font-size: 1.1rem; color: var(--graphite-400); padding: 10px 0 14px 0; transition: all 0.2s ease; }
     .stTabs [data-baseweb="tab"]:hover { color: var(--graphite-700); }
     .stTabs [aria-selected="true"] { color: var(--graphite-900) !important; border-bottom: 2px solid var(--graphite-900) !important; }
-    section[data-testid="stSidebar"] { background: var(--bg-card); border-right: 1px solid var(--border-light); padding: 2rem 1.5rem; }
+    
+    /* FIX: Force Sidebar to always be visible and pinned */
+    section[data-testid="stSidebar"] {
+        background: var(--bg-card);
+        border-right: 1px solid var(--border-light);
+        padding: 2rem 1.5rem;
+        min-width: 300px !important;
+        max-width: 300px !important;
+        display: block !important;
+    }
+    section[data-testid="stSidebar"] > div {
+        position: sticky;
+        top: 2rem;
+    }
     section[data-testid="stSidebar"] h3 { font-size: 1rem !important; margin-top: 1.5rem !important; margin-bottom: 0.5rem !important; }
     section[data-testid="stSidebar"] label { font-family: 'JetBrains Mono', monospace !important; font-size: 0.7rem !important; text-transform: uppercase; letter-spacing: 0.1em; color: var(--graphite-500) !important; }
+    
     .risk-row { padding: 14px 0; border-bottom: 1px solid var(--border-light); }
     .risk-row:last-child { border-bottom: none; }
     .risk-row-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
@@ -973,19 +1002,19 @@ def render_header():
     st.markdown(_h("""
     <div class="ticker-container">
         <div class="ticker-track">
-            <strong>EIBRIEF-AI v5.2 GRAPHITE</strong> &nbsp;|&nbsp;
+            <strong>EIBRIEF-AI v6.0 GRAPHITE</strong> &nbsp;|&nbsp;
             ALL SYSTEMS NOMINAL &nbsp;|&nbsp;
             30 INDUSTRIES ACTIVE &nbsp;|&nbsp;
             NEURAL MESH ONLINE &nbsp;|&nbsp;
-            DETERMINISTIC RISK ENGINE &nbsp;|&nbsp;
+            HUMAN-FRIENDLY TONE &nbsp;|&nbsp;
             ZERO-RUPEE ARCHITECTURE &nbsp;|&nbsp;
             READ TIME &lt; 60s &nbsp;|&nbsp;
             NO EMOJI &nbsp;|&nbsp;
-            <strong>EIBRIEF-AI v5.2 GRAPHITE</strong> &nbsp;|&nbsp;
+            <strong>EIBRIEF-AI v6.0 GRAPHITE</strong> &nbsp;|&nbsp;
             ALL SYSTEMS NOMINAL &nbsp;|&nbsp;
             30 INDUSTRIES ACTIVE &nbsp;|&nbsp;
             NEURAL MESH ONLINE &nbsp;|&nbsp;
-            DETERMINISTIC RISK ENGINE &nbsp;|&nbsp;
+            HUMAN-FRIENDLY TONE &nbsp;|&nbsp;
             ZERO-RUPEE ARCHITECTURE &nbsp;|&nbsp;
             READ TIME &lt; 60s &nbsp;|&nbsp;
             NO EMOJI &nbsp;|&nbsp;
@@ -1290,7 +1319,7 @@ def render_archive_tab():
 def render_footer():
     st.markdown(_h("""
     <div style="display: flex; justify-content: space-between; padding: 32px 0 12px; font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: 0.1em; color: #A1A1AA; border-top: 1px solid #F4F4F5; margin-top: 32px;">
-        <span>EIBRIEF-AI v5.2 GRAPHITE</span>
+        <span>EIBRIEF-AI v6.0 GRAPHITE</span>
         <span>SYNTHESIS IS AUTOMATION -- JUDGMENT IS YOURS</span>
         <span>KADURI GANESH</span>
     </div>
