@@ -8,7 +8,7 @@
   ╚══════╝ ╚═════╝ ╚═════╝ ╚═╝  ╚═╝╚═╝╚═╝     ╚═╝╚══════╝
 
   EiBrief-AI Universal :: Enterprise Signal Synthesis OS
-  Version : 6.0.0 "Dynamic Graphite"
+  Version : 7.0.0 "Dynamic Graphite"
   Author  : Kaduri Ganesh
 ================================================================================
 """
@@ -37,13 +37,17 @@ except ImportError:
 # ----------------------------------------------------------------------------
 # FIXED CREDENTIALS (backend-only, never exposed to frontend)
 # ----------------------------------------------------------------------------
-_GEMINI_API_KEY =  st.secrets["GEMINI_API_KEY"]
+_GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
 _GEMINI_MODEL = "gemini-1.5-pro"
 
 APP_NAME = "EiBrief-AI Universal"
 APP_TAGLINE = "Just tell me what changed."
-APP_VERSION = "6.0.0 Graphite"
+APP_VERSION = "7.0.0 Graphite"
 DB_FILE = "eibrief_archive.db"
+
+# ============================================================================
+# DATA MODELS (Moved up to prevent any initialization errors)
+# ============================================================================
 
 SEVERITY_WEIGHT = {
     "critical": 1.00,
@@ -64,6 +68,106 @@ def risk_score(severity: str, days_ago: int) -> float:
     rec = _recency_weight(days_ago)
     return round(sev * 0.7 + rec * 0.3, 2)
 
+@dataclass
+class Risk:
+    category: str
+    severity: str
+    days_ago: int
+    why: str
+
+    @property
+    def score(self) -> float:
+        return risk_score(self.severity, self.days_ago)
+
+    def to_markdown_line(self, index: int) -> str:
+        age = "today" if self.days_ago <= 0 else f"{self.days_ago}d ago"
+        return f"{index}. **{self.category}** -- `{self.severity.upper()}` -- score `{self.score}` -- {self.why} ({age})"
+
+    def to_html_row(self, rank: int) -> str:
+        age = "today" if self.days_ago <= 0 else f"{self.days_ago}d ago"
+        sev = self.severity.lower()
+        bar_color = "var(--graphite-900)" if sev == "critical" else "var(--graphite-700)" if sev == "high" else "var(--graphite-500)" if sev == "medium" else "var(--graphite-300)"
+        return f"""
+        <div class="risk-row">
+            <div class="risk-row-top">
+                <div class="risk-row-left">
+                    <span class="risk-rank">{rank}</span>
+                    <strong class="risk-category">{self.category}</strong>
+                    <span class="pixel-badge">{self.severity.upper()}</span>
+                </div>
+                <span class="risk-score">{self.score}</span>
+            </div>
+            <div class="risk-reason">{self.why} <span class="risk-age">-- {age}</span></div>
+            <div class="bar-track">
+                <div class="bar-fill" style="width: {self.score * 100}%; background: {bar_color};"></div>
+            </div>
+        </div>
+        """
+
+@dataclass
+class Brief:
+    brief_id: str
+    role: str
+    project: str
+    reader: str
+    run_date: str
+    changes: List[str]
+    matters: str
+    top_risks: List[Risk]
+    action: str
+    raw_signals: str
+    confidence: float
+    used_llm: bool
+
+    def to_markdown(self) -> str:
+        lines = [f"# {self.project} -- EiBrief", "", f"**Role:** {self.role}  ", f"**Reader:** {self.reader}  ", f"**Generated:** {self.run_date}  ", f"**Confidence:** {self.confidence:.0%}  ", f"**Mode:** {'AI Synthesis' if self.used_llm else 'Deterministic'}", "", "---", "", "## WHAT'S CHANGED (last 24h)"]
+        for c in self.changes: lines.append(f"- {c}")
+        lines += ["", "## WHAT MATTERS NOW", "", self.matters, "", "## TOP 3 RISKS (scored by deterministic rules)", ""]
+        for i, r in enumerate(self.top_risks[:3], 1): lines.append(r.to_markdown_line(i))
+        lines += ["", "## SUGGESTED NEXT ACTION", "", self.action, "", "---", "", f"*EiBrief-AI v{APP_VERSION} -- Kaduri Ganesh*"]
+        return "\n".join(lines)
+
+    def to_dict(self) -> Dict[str, Any]:
+        d = asdict(self)
+        d["top_risks"] = [{"category": r.category, "severity": r.severity, "days_ago": r.days_ago, "why": r.why, "score": r.score} for r in self.top_risks]
+        return d
+
+    def to_html(self) -> str:
+        changes_html = "\n".join(f'<li class="change-item">{c}</li>' for c in self.changes)
+        risks_html = "\n".join(r.to_html_row(i) for i, r in enumerate(self.top_risks[:3], 1))
+        mode_badge = "AI SYNTHESIS" if self.used_llm else "DETERMINISTIC"
+        return f"""
+        <div class="brief-rendered">
+            <div class="brief-header">
+                <div>
+                    <h2 class="brief-title">{self.project}</h2>
+                    <div class="brief-meta">{self.role} | {self.reader} | {self.run_date}</div>
+                </div>
+                <div class="brief-badges">
+                    <span class="pixel-badge"><span class="status-dot"></span>VERIFIED</span>
+                    <span class="pixel-badge">{self.confidence:.0%} CONFIDENCE</span>
+                    <span class="pixel-badge">{mode_badge}</span>
+                </div>
+            </div>
+            <div class="brief-section">
+                <div class="section-label">WHAT'S CHANGED (LAST 24H)</div>
+                <ul class="change-list">{changes_html}</ul>
+            </div>
+            <div class="brief-section">
+                <div class="section-label">WHAT MATTERS NOW</div>
+                <p class="matters-text">{self.matters}</p>
+            </div>
+            <div class="brief-section">
+                <div class="section-label">TOP 3 RISKS (deterministic, not LLM)</div>
+                <div class="risks-container">{risks_html}</div>
+            </div>
+            <div class="brief-section">
+                <div class="section-label">SUGGESTED NEXT ACTION</div>
+                <p class="action-text">{self.action}</p>
+            </div>
+        </div>
+        """
+
 # ----------------------------------------------------------------------------
 # SIGNAL-PARSING RISK DETECTOR (makes risks react to what you type)
 # ----------------------------------------------------------------------------
@@ -78,7 +182,7 @@ RISK_RULES = [
     (["dropped", "drop", "decline", "degraded", "errors"], "Metric Deterioration", "medium"),
 ]
 
-def detect_risks_from_signals(signals: str) -> List["Risk"]:
+def detect_risks_from_signals(signals: str) -> List[Risk]:
     detected: List[Risk] = []
     seen = set()
     for keywords, category, severity in RISK_RULES:
@@ -96,7 +200,7 @@ def detect_risks_from_signals(signals: str) -> List["Risk"]:
                 break
     return detected
 
-def build_risk_pool(role: str, signals: str = "") -> List["Risk"]:
+def build_risk_pool(role: str, signals: str = "") -> List[Risk]:
     pool = [Risk(c, s, d, w) for (c, s, d, w) in ROLES[role]["risks"]]
     if signals and signals.strip():
         pool = detect_risks_from_signals(signals) + pool
@@ -584,110 +688,6 @@ ROLES: Dict[str, Dict[str, Any]] = {
 }
 
 # ============================================================================
-# DATA MODELS
-# ============================================================================
-
-@dataclass
-class Risk:
-    category: str
-    severity: str
-    days_ago: int
-    why: str
-
-    @property
-    def score(self) -> float:
-        return risk_score(self.severity, self.days_ago)
-
-    def to_markdown_line(self, index: int) -> str:
-        age = "today" if self.days_ago <= 0 else f"{self.days_ago}d ago"
-        return f"{index}. **{self.category}** -- `{self.severity.upper()}` -- score `{self.score}` -- {self.why} ({age})"
-
-    def to_html_row(self, rank: int) -> str:
-        age = "today" if self.days_ago <= 0 else f"{self.days_ago}d ago"
-        sev = self.severity.lower()
-        bar_color = "var(--graphite-900)" if sev == "critical" else "var(--graphite-700)" if sev == "high" else "var(--graphite-500)" if sev == "medium" else "var(--graphite-300)"
-        return f"""
-        <div class="risk-row">
-            <div class="risk-row-top">
-                <div class="risk-row-left">
-                    <span class="risk-rank">{rank}</span>
-                    <strong class="risk-category">{self.category}</strong>
-                    <span class="pixel-badge">{self.severity.upper()}</span>
-                </div>
-                <span class="risk-score">{self.score}</span>
-            </div>
-            <div class="risk-reason">{self.why} <span class="risk-age">-- {age}</span></div>
-            <div class="bar-track">
-                <div class="bar-fill" style="width: {self.score * 100}%; background: {bar_color};"></div>
-            </div>
-        </div>
-        """
-
-@dataclass
-class Brief:
-    brief_id: str
-    role: str
-    project: str
-    reader: str
-    run_date: str
-    changes: List[str]
-    matters: str
-    top_risks: List[Risk]
-    action: str
-    raw_signals: str
-    confidence: float
-    used_llm: bool
-
-    def to_markdown(self) -> str:
-        lines = [f"# {self.project} -- EiBrief", "", f"**Role:** {self.role}  ", f"**Reader:** {self.reader}  ", f"**Generated:** {self.run_date}  ", f"**Confidence:** {self.confidence:.0%}  ", f"**Mode:** {'AI Synthesis' if self.used_llm else 'Deterministic'}", "", "---", "", "## WHAT'S CHANGED (last 24h)"]
-        for c in self.changes: lines.append(f"- {c}")
-        lines += ["", "## WHAT MATTERS NOW", "", self.matters, "", "## TOP 3 RISKS (scored by deterministic rules)", ""]
-        for i, r in enumerate(self.top_risks[:3], 1): lines.append(r.to_markdown_line(i))
-        lines += ["", "## SUGGESTED NEXT ACTION", "", self.action, "", "---", "", f"*EiBrief-AI v{APP_VERSION} -- Kaduri Ganesh*"]
-        return "\n".join(lines)
-
-    def to_dict(self) -> Dict[str, Any]:
-        d = asdict(self)
-        d["top_risks"] = [{"category": r.category, "severity": r.severity, "days_ago": r.days_ago, "why": r.why, "score": r.score} for r in self.top_risks]
-        return d
-
-    def to_html(self) -> str:
-        changes_html = "\n".join(f'<li class="change-item">{c}</li>' for c in self.changes)
-        risks_html = "\n".join(r.to_html_row(i) for i, r in enumerate(self.top_risks[:3], 1))
-        mode_badge = "AI SYNTHESIS" if self.used_llm else "DETERMINISTIC"
-        return f"""
-        <div class="brief-rendered">
-            <div class="brief-header">
-                <div>
-                    <h2 class="brief-title">{self.project}</h2>
-                    <div class="brief-meta">{self.role} | {self.reader} | {self.run_date}</div>
-                </div>
-                <div class="brief-badges">
-                    <span class="pixel-badge"><span class="status-dot"></span>VERIFIED</span>
-                    <span class="pixel-badge">{self.confidence:.0%} CONFIDENCE</span>
-                    <span class="pixel-badge">{mode_badge}</span>
-                </div>
-            </div>
-            <div class="brief-section">
-                <div class="section-label">WHAT'S CHANGED (LAST 24H)</div>
-                <ul class="change-list">{changes_html}</ul>
-            </div>
-            <div class="brief-section">
-                <div class="section-label">WHAT MATTERS NOW</div>
-                <p class="matters-text">{self.matters}</p>
-            </div>
-            <div class="brief-section">
-                <div class="section-label">TOP 3 RISKS (deterministic, not LLM)</div>
-                <div class="risks-container">{risks_html}</div>
-            </div>
-            <div class="brief-section">
-                <div class="section-label">SUGGESTED NEXT ACTION</div>
-                <p class="action-text">{self.action}</p>
-            </div>
-        </div>
-        """
-
-# ============================================================================
 # DATABASE LAYER (SQLite Archive with Auto-Migration)
 # ============================================================================
 
@@ -752,22 +752,27 @@ def _configure_gemini() -> bool:
 
 def _llm_synthesise(role: str, signals: str, top_risks: List[Risk]) -> Optional[Dict[str, Any]]:
     risks_summary = "\n".join(f"- {r.category} ({r.severity}, score {r.score}): {r.why}" for r in top_risks[:3])
-    prompt = f"""You are Ei, a highly empathetic and sharp senior analyst. Your job is to read messy, lengthy raw operational signals for a {role} and distill them into a clear, human-friendly executive brief. 
+    prompt = f"""You are Ei, a highly empathetic, clear, and sharp senior analyst. 
+    Your job is to read messy, lengthy, unstructured raw operational signals for a {role} and distill them into a clean, human-friendly executive brief.
 
-Write in plain, accessible English. Avoid technical jargon where possible. Explain *why* it matters in a way a non-technical executive could understand instantly without feeling overwhelmed.
+    INSTRUCTIONS:
+    1. Filter out the noise. Focus only on what materially changed or what is broken/failing.
+    2. Write in plain, accessible English. No technical jargon. Explain things so a non-technical executive can understand the real-world impact instantly.
+    3. Be accurate. Do not hallucinate or invent data not present in the signals.
+    4. Be calm and professional. 
 
-Return a JSON object with exactly these keys:
-1. "changes": A list of 3 to 5 concise bullet points summarizing what materially changed in the last 24 hours. Strip out the noise.
-2. "matters": 1 to 2 sentences connecting the dots. Explain the real-world impact of these changes in a calm, professional tone.
-3. "action": One single, clear sentence stating the most useful next step.
+    Return a JSON object with exactly these keys:
+    - "changes": A list of 3 to 5 concise, easy-to-read bullet points summarizing the most important changes.
+    - "matters": 1 to 2 sentences connecting the dots. Explain the real-world business impact in a calm, professional tone.
+    - "action": One single, clear sentence stating the most useful next step.
 
-Do not use emojis. Ground every sentence strictly in the provided signals.
+    Do not use emojis. Ground every sentence strictly in the provided signals.
 
-RAW SIGNALS:
-{signals}
+    RAW SIGNALS (might be messy):
+    {signals}
 
-PRE-SCORED TOP RISKS:
-{risks_summary}"""
+    PRE-SCORED TOP RISKS:
+    {risks_summary}"""
     
     try:
         model = genai.GenerativeModel(_GEMINI_MODEL)
@@ -794,16 +799,18 @@ def _fallback_synthesise(signals: str, top_risks: List[Risk]) -> Dict[str, Any]:
     changes = []
     for ln in signals.splitlines():
         clean = re.sub(r"^\[.*?\]\s*", "", ln).strip()
-        if clean: changes.append(clean)
+        if clean:
+            # Make it a bit more readable
+            changes.append(clean)
     changes = changes[:5]
-    if not changes: changes = ["No material changes detected in the signal window."]
+    if not changes: changes = ["No major changes detected in the system logs."]
     if top_risks:
         top = top_risks[0]
-        matters = f"The signals above share an underlying story: the most urgent signal is {top.category.lower()}, which correlates with the broader pattern."
-        action = f"Address {top.category.lower()} before any other work today; {top.why.lower()}"
+        matters = f"The most important thing right now is the {top.category.lower()}. This is likely the root cause of the other issues we are seeing."
+        action = f"Please focus on resolving the {top.category.lower()} first, because {top.why.lower()}."
     else:
-        matters = "No material risks detected. The signals are within normal operating ranges."
-        action = "Continue monitoring; no immediate action required."
+        matters = "Everything looks normal right now. No major risks detected."
+        action = "Keep an eye on the systems, but no immediate action is needed."
     return {"changes": changes, "matters": matters, "action": action}
 
 # ============================================================================
@@ -822,7 +829,7 @@ _CSS = """
         --ease-smooth: cubic-bezier(0.16, 1, 0.3, 1);
     }
     .stApp { background-color: var(--bg-absolute); color: var(--graphite-900); font-family: 'Inter', -apple-system, sans-serif !important; -webkit-font-smoothing: antialiased; }
-    #MainMenu, header, footer, .stDeployButton, .stAppViewBlockContainer { visibility: hidden !important; display: none !important; }
+    #MainMenu, footer, .stDeployButton, .stAppViewBlockContainer { visibility: hidden !important; display: none !important; }
     .block-container { max-width: 1400px; padding: 2.5rem 3rem 6rem 3rem !important; }
     h1, h2, h3, h4, h5, h6 { font-family: 'Sora', sans-serif !important; color: var(--graphite-900) !important; letter-spacing: -0.02em !important; line-height: 1.2 !important; }
     h1 { font-size: 3.5rem !important; font-weight: 600 !important; margin: 0 !important; }
@@ -857,14 +864,11 @@ _CSS = """
     .stTabs [data-baseweb="tab"]:hover { color: var(--graphite-700); }
     .stTabs [aria-selected="true"] { color: var(--graphite-900) !important; border-bottom: 2px solid var(--graphite-900) !important; }
     
-    /* FIX: Force Sidebar to always be visible and pinned */
+    /* FIX: Removed aggressive width overrides that broke the native Streamlit sidebar button. */
     section[data-testid="stSidebar"] {
         background: var(--bg-card);
         border-right: 1px solid var(--border-light);
         padding: 2rem 1.5rem;
-        min-width: 300px !important;
-        max-width: 300px !important;
-        display: block !important;
     }
     section[data-testid="stSidebar"] > div {
         position: sticky;
@@ -1002,7 +1006,7 @@ def render_header():
     st.markdown(_h("""
     <div class="ticker-container">
         <div class="ticker-track">
-            <strong>EIBRIEF-AI v6.0 GRAPHITE</strong> &nbsp;|&nbsp;
+            <strong>EIBRIEF-AI v7.0 GRAPHITE</strong> &nbsp;|&nbsp;
             ALL SYSTEMS NOMINAL &nbsp;|&nbsp;
             30 INDUSTRIES ACTIVE &nbsp;|&nbsp;
             NEURAL MESH ONLINE &nbsp;|&nbsp;
@@ -1010,7 +1014,7 @@ def render_header():
             ZERO-RUPEE ARCHITECTURE &nbsp;|&nbsp;
             READ TIME &lt; 60s &nbsp;|&nbsp;
             NO EMOJI &nbsp;|&nbsp;
-            <strong>EIBRIEF-AI v6.0 GRAPHITE</strong> &nbsp;|&nbsp;
+            <strong>EIBRIEF-AI v7.0 GRAPHITE</strong> &nbsp;|&nbsp;
             ALL SYSTEMS NOMINAL &nbsp;|&nbsp;
             30 INDUSTRIES ACTIVE &nbsp;|&nbsp;
             NEURAL MESH ONLINE &nbsp;|&nbsp;
@@ -1319,7 +1323,7 @@ def render_archive_tab():
 def render_footer():
     st.markdown(_h("""
     <div style="display: flex; justify-content: space-between; padding: 32px 0 12px; font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: 0.1em; color: #A1A1AA; border-top: 1px solid #F4F4F5; margin-top: 32px;">
-        <span>EIBRIEF-AI v6.0 GRAPHITE</span>
+        <span>EIBRIEF-AI v7.0 GRAPHITE</span>
         <span>SYNTHESIS IS AUTOMATION -- JUDGMENT IS YOURS</span>
         <span>KADURI GANESH</span>
     </div>
